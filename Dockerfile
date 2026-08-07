@@ -1,8 +1,8 @@
 # Use Official Node.js LTS image with FFmpeg installed
 FROM node:20-alpine
 
-# Install FFmpeg and bash
-RUN apk add --no-available --no-cache ffmpeg bash
+# Install FFmpeg and bash on Alpine Linux
+RUN apk add --no-cache ffmpeg bash
 
 # Set working directory
 WORKDIR /app
