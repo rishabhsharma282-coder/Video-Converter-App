@@ -54,7 +54,50 @@ function timeToSec(timeStr) {
 }
 
 /**
- * 🎬 Standard 1.0x Normal Speed Browser Precision Trim Engine (AAC Audio, Zero Opus Error, Smooth Seeking)
+ * 🚀 Relocates MP4 'moov' atom from end of file to front (+faststart)
+ * so Windows Media Player immediately sees duration & draggable seek bar!
+ */
+async function relocateMoovToFront(blob) {
+  try {
+    const buffer = await blob.arrayBuffer();
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+
+    let ftypPos = -1, ftypSize = 0;
+    let moovPos = -1, moovSize = 0;
+    let mdatPos = -1, mdatSize = 0;
+
+    let offset = 0;
+    while (offset < bytes.length - 8) {
+      const size = view.getUint32(offset, false);
+      const type = String.fromCharCode(bytes[offset+4], bytes[offset+5], bytes[offset+6], bytes[offset+7]);
+      
+      if (type === 'ftyp') { ftypPos = offset; ftypSize = size; }
+      if (type === 'moov') { moovPos = offset; moovSize = size; }
+      if (type === 'mdat') { mdatPos = offset; mdatSize = size; }
+
+      if (size <= 1) break;
+      offset += size;
+    }
+
+    if (ftypPos !== -1 && moovPos !== -1 && mdatPos !== -1 && moovPos > mdatPos) {
+      const ftypChunk = bytes.subarray(ftypPos, ftypPos + ftypSize);
+      const moovChunk = bytes.subarray(moovPos, moovPos + moovSize);
+      const mdatChunk = bytes.subarray(mdatPos, moovPos);
+
+      const fastStartBuffer = new Uint8Array(bytes.length);
+      fastStartBuffer.set(ftypChunk, 0);
+      fastStartBuffer.set(moovChunk, ftypSize);
+      fastStartBuffer.set(mdatChunk, ftypSize + moovSize);
+
+      return new Blob([fastStartBuffer], { type: 'video/mp4' });
+    }
+  } catch (e) {}
+  return blob;
+}
+
+/**
+ * 🎬 Standard 1.0x Normal Speed Engine (+faststart moov relocation for Windows Media Player seek bar)
  */
 function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
   return new Promise((resolve, reject) => {
@@ -72,7 +115,6 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
       try {
         const stream = v.captureStream ? v.captureStream() : v.mozCaptureStream();
         
-        // Prioritize AAC / MP4 / Vorbis codecs to prevent Windows Media Player Opus audio errors!
         let mimeType = '';
         const supportedTypes = [
           'video/mp4;codecs="avc1.42E01E, mp4a.40.2"',
@@ -92,7 +134,7 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
 
         const mediaRecorder = new MediaRecorder(stream, {
           mimeType,
-          videoBitsPerSecond: 5000000 // 5 Mbps clear quality
+          videoBitsPerSecond: 5000000
         });
         const chunks = [];
 
@@ -100,9 +142,13 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
           if (e.data.size > 0) chunks.push(e.data);
         };
 
-        mediaRecorder.onstop = () => {
-          const blob = new Blob(chunks, { type: mimeType });
-          const outputUrl = URL.createObjectURL(blob);
+        mediaRecorder.onstop = async () => {
+          const rawBlob = new Blob(chunks, { type: mimeType });
+          
+          // Relocate moov atom to front so Windows Media Player seek bar is 100% active & draggable!
+          const seekableBlob = await relocateMoovToFront(rawBlob);
+
+          const outputUrl = URL.createObjectURL(seekableBlob);
           const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
           const outputFileName = `trim_${Date.now()}.${ext}`;
           const targetDur = Math.max(0.1, endSec - startSec);
@@ -111,21 +157,20 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
             success: true,
             outputFileName,
             downloadUrl: outputUrl,
-            sizeBytes: blob.size,
+            sizeBytes: seekableBlob.size,
             historyItem: {
               id: Date.now(),
               fileName: outputFileName,
               originalName: 'Trimmed Clip',
               action: 'Precision Trim',
               trimDuration: `${targetDur.toFixed(1)}s`,
-              outputSize: blob.size,
+              outputSize: seekableBlob.size,
               downloadUrl: outputUrl,
               timestamp: new Date().toLocaleTimeString()
             }
           });
         };
 
-        // 🎬 Enforce 1.0x Normal Speed Playback so video plays at true 1x speed!
         v.playbackRate = 1.0;
         v.play().catch(() => {});
         mediaRecorder.start(100);
@@ -242,7 +287,7 @@ export default function App() {
     return eventSource;
   };
 
-  // 1. Single Trim Execution (UNIVERSAL AAC CODEC + 1.0x NORMAL SPEED ENGINE)
+  // 1. Single Trim Execution
   const handleExecuteTrim = async ({ startTime: sTimeStr, endTime: eTimeStr }) => {
     if (!videoFile) return;
     const jobId = `job_${Date.now()}`;
@@ -280,9 +325,9 @@ export default function App() {
       } catch (err) {}
     }
 
-    // 🎬 UNIVERSAL AAC CODEC + 1.0x NORMAL SPEED BROWSER TRIM ENGINE
+    // 🎬 ACCURATE BROWSER TRIM ENGINE WITH FASTSTART MOOV RELOCATION
     try {
-      setRenderLogs((prev) => [...prev, 'Encoding precise AAC audio video clip...']);
+      setRenderLogs((prev) => [...prev, 'Encoding seekable MP4 clip...']);
       setRenderProgress(15);
 
       const trimmedData = await accurateClientTrim(
