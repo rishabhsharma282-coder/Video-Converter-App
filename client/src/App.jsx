@@ -54,7 +54,7 @@ function timeToSec(timeStr) {
 }
 
 /**
- * 🎬 100% Accurate & Fast Browser Precision Trim Engine (Real Trim, Fast Speed)
+ * 🎬 Standard 1.0x Normal Speed Browser Precision Trim Engine (AAC Audio, Zero Opus Error, Smooth Seeking)
  */
 function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
   return new Promise((resolve, reject) => {
@@ -72,9 +72,22 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
       try {
         const stream = v.captureStream ? v.captureStream() : v.mozCaptureStream();
         
-        let mimeType = 'video/webm';
-        if (MediaRecorder.isTypeSupported('video/mp4')) {
-          mimeType = 'video/mp4';
+        // Prioritize AAC / MP4 / Vorbis codecs to prevent Windows Media Player Opus audio errors!
+        let mimeType = '';
+        const supportedTypes = [
+          'video/mp4;codecs="avc1.42E01E, mp4a.40.2"',
+          'video/mp4;codecs=avc1,aac',
+          'video/mp4',
+          'video/webm;codecs=vp8,vorbis',
+          'video/webm;codecs=vp9,vorbis',
+          'video/webm'
+        ];
+
+        for (const type of supportedTypes) {
+          if (MediaRecorder.isTypeSupported(type)) {
+            mimeType = type;
+            break;
+          }
         }
 
         const mediaRecorder = new MediaRecorder(stream, {
@@ -112,10 +125,10 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
           });
         };
 
-        // 2.5x Fast Speed for rapid execution while maintaining 100% accurate trim boundaries
-        v.playbackRate = 2.5;
+        // 🎬 Enforce 1.0x Normal Speed Playback so video plays at true 1x speed!
+        v.playbackRate = 1.0;
         v.play().catch(() => {});
-        mediaRecorder.start(50);
+        mediaRecorder.start(100);
 
         const targetDuration = Math.max(0.1, endSec - startSec);
         const checkInterval = setInterval(() => {
@@ -130,7 +143,7 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
               mediaRecorder.stop();
             }
           }
-        }, 40);
+        }, 100);
       } catch (err) {
         reject(err);
       }
@@ -229,7 +242,7 @@ export default function App() {
     return eventSource;
   };
 
-  // 1. Single Trim Execution (100% ACCURATE & FAST PRECISION ENGINE)
+  // 1. Single Trim Execution (UNIVERSAL AAC CODEC + 1.0x NORMAL SPEED ENGINE)
   const handleExecuteTrim = async ({ startTime: sTimeStr, endTime: eTimeStr }) => {
     if (!videoFile) return;
     const jobId = `job_${Date.now()}`;
@@ -267,9 +280,9 @@ export default function App() {
       } catch (err) {}
     }
 
-    // 🎬 100% ACCURATE & FAST BROWSER PRECISION TRIM ENGINE
+    // 🎬 UNIVERSAL AAC CODEC + 1.0x NORMAL SPEED BROWSER TRIM ENGINE
     try {
-      setRenderLogs((prev) => [...prev, 'Encoding precise trimmed video clip...']);
+      setRenderLogs((prev) => [...prev, 'Encoding precise AAC audio video clip...']);
       setRenderProgress(15);
 
       const trimmedData = await accurateClientTrim(

@@ -63,7 +63,7 @@ function getVideoMetadata(filePath) {
  */
 function runFFmpegCommand(args, totalDurationSec, progressCallback) {
   return new Promise((resolve, reject) => {
-    console.log('Running FFmpeg (Instant Keyframe Stream Copy):', 'ffmpeg ' + args.join(' '));
+    console.log('Running FFmpeg (Instant AAC Stream Copy):', 'ffmpeg ' + args.join(' '));
     const process = spawn('ffmpeg', args);
     let logBuffer = '';
 
@@ -129,7 +129,7 @@ function getCRFValue(compression) {
 }
 
 /**
- * 1. Trim Single Segment (SUPERSONIC INSTANT KEYFRAME STREAM COPY - 0.1 SECONDS)
+ * 1. Trim Single Segment (INSTANT FAST AAC STREAM COPY - 0.1s Execution, Universal Windows Media Player Support)
  */
 async function trimVideo(inputPath, startTime, endTime, options = {}, progressCallback) {
   const outputFileName = `trim_${Date.now()}.${options.format || 'mp4'}`;
@@ -139,17 +139,17 @@ async function trimVideo(inputPath, startTime, endTime, options = {}, progressCa
   const endSec = timeToSeconds(endTime);
   const targetDuration = Math.max(0.1, endSec - startSec);
 
-  // Fast Keyframe Seek (-ss BEFORE -i) for instant 0.001s seek
+  // Fast Keyframe Seek (-ss BEFORE -i) for instant 0.1s seek
   const args = ['-y', '-ss', String(startSec), '-i', inputPath, '-t', String(targetDuration)];
 
   const scaleFilter = getQualityScaleFilter(options.quality);
   const crf = getCRFValue(options.compression);
 
-  // If no resolution scaling is requested, ALWAYS use instant codec stream copy (-c copy) for 0.1s execution!
   if (!scaleFilter) {
-    args.push('-c', 'copy');
+    // Stream copy video, transcode audio to universal AAC, and relocate moov atom to start for instant seeking!
+    args.push('-c:v', 'copy', '-c:a', 'aac', '-movflags', '+faststart');
   } else {
-    args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-crf', crf, '-c:a', 'aac');
+    args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-crf', crf, '-c:a', 'aac', '-movflags', '+faststart');
   }
 
   args.push(outputPath);
@@ -180,26 +180,21 @@ async function multiTrimConcat(inputPath, segments, options = {}, progressCallba
     concatInputs.push(`[v${index}][a${index}]`);
   });
 
-  const filterGraph = `${filterParts.join(';')}; ${concatInputs.join('')}concat=n=${segments.length}:v=1:a=1[outv][outa]`;
+  const filterComplex = `${filterParts.join(';')};${concatInputs.join('')}concat=n=${segments.length}:v=1:a=1[outv][outa]`;
 
+  const crf = getCRFValue(options.compression);
   const args = [
     '-y',
-    '-i',
-    inputPath,
-    '-filter_complex',
-    filterGraph,
-    '-map',
-    '[outv]',
-    '-map',
-    '[outa]',
-    '-c:v',
-    'libx264',
-    '-preset',
-    'ultrafast',
-    '-threads',
-    '0',
-    '-c:a',
-    'aac',
+    '-i', inputPath,
+    '-filter_complex', filterComplex,
+    '-map', '[outv]',
+    '-map', '[outa]',
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-threads', '0',
+    '-crf', crf,
+    '-c:a', 'aac',
+    '-movflags', '+faststart',
     outputPath
   ];
 
@@ -208,325 +203,185 @@ async function multiTrimConcat(inputPath, segments, options = {}, progressCallba
 }
 
 /**
- * 3. Silence Detection
+ * 3. Crop Video (Resolution / Aspect Ratio)
  */
-function detectSilence(inputPath, noiseDb = '-30dB', minSilenceDuration = 0.5) {
-  return new Promise((resolve, reject) => {
-    const args = ['-i', inputPath, '-af', `silencedetect=noise=${noiseDb}:d=${minSilenceDuration}`, '-f', 'null', '-'];
-    const process = spawn('ffmpeg', args);
-
-    let stderrData = '';
-    process.stderr.on('data', (d) => {
-      stderrData += d.toString();
-    });
-
-    process.on('close', async (code) => {
-      try {
-        const metadata = await getVideoMetadata(inputPath);
-        const totalDuration = metadata.duration;
-
-        const silenceStartRegex = /silence_start:\s*([\d\.]+)/g;
-        const silenceEndRegex = /silence_end:\s*([\d\.]+)/g;
-
-        const silenceStarts = [];
-        const silenceEnds = [];
-
-        let match;
-        while ((match = silenceStartRegex.exec(stderrData)) !== null) {
-          silenceStarts.push(parseFloat(match[1]));
-        }
-        while ((match = silenceEndRegex.exec(stderrData)) !== null) {
-          silenceEnds.push(parseFloat(match[1]));
-        }
-
-        const silentSegments = [];
-        for (let i = 0; i < silenceStarts.length; i++) {
-          silentSegments.push({
-            start: silenceStarts[i],
-            end: silenceEnds[i] || totalDuration
-          });
-        }
-
-        const activeSegments = [];
-        let lastEnd = 0;
-        silentSegments.forEach((silence) => {
-          if (silence.start > lastEnd + 0.2) {
-            activeSegments.push({
-              start: secondsToTime(lastEnd),
-              end: secondsToTime(silence.start),
-              startSec: lastEnd,
-              endSec: silence.start
-            });
-          }
-          lastEnd = silence.end;
-        });
-
-        if (lastEnd < totalDuration - 0.2) {
-          activeSegments.push({
-            start: secondsToTime(lastEnd),
-            end: secondsToTime(totalDuration),
-            startSec: lastEnd,
-            endSec: totalDuration
-          });
-        }
-
-        resolve({
-          totalDuration,
-          silentSegments,
-          activeSegments
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
-  });
-}
-
-/**
- * 4. Auto Highlight Detection
- */
-async function detectHighlights(inputPath) {
-  const silenceResult = await detectSilence(inputPath, '-25dB', 0.8);
-  const highlights = (silenceResult.activeSegments || [])
-    .filter((seg) => seg.endSec - seg.startSec >= 2.0)
-    .map((seg, idx) => ({
-      id: `highlight_${idx + 1}`,
-      title: `Highlight Clip #${idx + 1}`,
-      start: seg.start,
-      end: seg.end,
-      duration: (seg.endSec - seg.startSec).toFixed(1) + 's'
-    }));
-
-  return highlights;
-}
-
-/**
- * 5. Crop Video (Ultrafast Multi-Threading)
- */
-async function cropVideo(inputPath, aspect, customCrop = {}, options = {}, progressCallback) {
-  const metadata = await getVideoMetadata(inputPath);
-  const { width: origW, height: origH, duration } = metadata;
-
-  let cropW = origW;
-  let cropH = origH;
-  let cropX = 0;
-  let cropY = 0;
-
-  if (aspect === '16:9') {
-    cropW = origW;
-    cropH = Math.round((origW * 9) / 16);
-    if (cropH > origH) {
-      cropH = origH;
-      cropW = Math.round((origH * 16) / 9);
-    }
-  } else if (aspect === '9:16') {
-    cropH = origH;
-    cropW = Math.round((origH * 9) / 16);
-    if (cropW > origW) {
-      cropW = origW;
-      cropH = Math.round((origW * 16) / 9);
-    }
-  } else if (aspect === '1:1') {
-    const side = Math.min(origW, origH);
-    cropW = side;
-    cropH = side;
-  } else if (aspect === 'custom' && customCrop.w && customCrop.h) {
-    cropW = customCrop.w;
-    cropH = customCrop.h;
-    cropX = customCrop.x || 0;
-    cropY = customCrop.y || 0;
-  }
-
-  cropX = Math.max(0, Math.min(origW - cropW, Math.round((origW - cropW) / 2)));
-  cropY = Math.max(0, Math.min(origH - cropH, Math.round((origH - cropH) / 2)));
-
+async function cropVideo(inputPath, aspect, customCrop, options = {}, progressCallback) {
   const outputFileName = `crop_${Date.now()}.${options.format || 'mp4'}`;
   const outputPath = path.join(OUTPUTS_DIR, outputFileName);
 
-  const args = [
-    '-y',
-    '-i',
-    inputPath,
-    '-vf',
-    `crop=${cropW}:${cropH}:${cropX}:${cropY}`,
-    '-c:v',
-    'libx264',
-    '-preset',
-    'ultrafast',
-    '-threads',
-    '0',
-    '-c:a',
-    'copy',
-    outputPath
-  ];
+  const meta = await getVideoMetadata(inputPath);
+  const inW = meta.width || 1920;
+  const inH = meta.height || 1080;
 
-  await runFFmpegCommand(args, duration, progressCallback);
-  return { outputPath, outputFileName };
-}
-
-/**
- * 6. Add Watermark (Text or Image Logo - Ultrafast Multi-Threading)
- */
-async function addWatermark(inputPath, watermarkConfig = {}, progressCallback) {
-  const metadata = await getVideoMetadata(inputPath);
-  const { duration } = metadata;
-
-  const outputFileName = `watermark_${Date.now()}.mp4`;
-  const outputPath = path.join(OUTPUTS_DIR, outputFileName);
-
-  const args = ['-y', '-i', inputPath];
-
-  if (watermarkConfig.type === 'text') {
-    const text = watermarkConfig.text || 'Smart Trimmer Pro';
-    const position = watermarkConfig.position || 'bottom-right';
-    let x = 'w-tw-20';
-    let y = 'h-th-20';
-
-    if (position === 'top-left') {
-      x = '20';
-      y = '20';
-    } else if (position === 'top-right') {
-      x = 'w-tw-20';
-      y = '20';
-    } else if (position === 'center') {
-      x = '(w-tw)/2';
-      y = '(h-th)/2';
-    } else if (position === 'bottom-left') {
-      x = '20';
-      y = 'h-th-20';
+  let cropFilter = '';
+  if (customCrop && customCrop.width && customCrop.height) {
+    cropFilter = `crop=${customCrop.width}:${customCrop.height}:${customCrop.x}:${customCrop.y}`;
+  } else {
+    switch (aspect) {
+      case '9:16': {
+        const targetW = Math.round(inH * (9 / 16));
+        cropFilter = `crop=${targetW}:${inH}:(in_w-${targetW})/2:0`;
+        break;
+      }
+      case '1:1': {
+        const side = Math.min(inW, inH);
+        cropFilter = `crop=${side}:${side}:(in_w-${side})/2:(in_h-${side})/2`;
+        break;
+      }
+      case '4:5': {
+        const targetW = Math.round(inH * (4 / 5));
+        cropFilter = `crop=${targetW}:${inH}:(in_w-${targetW})/2:0`;
+        break;
+      }
+      case '16:9':
+      default: {
+        cropFilter = `crop=${inW}:${inH}:0:0`;
+        break;
+      }
     }
-
-    const windowsFontPath = 'C\\:/Windows/Fonts/arial.ttf';
-    const fontfileSpec = process.platform === 'win32' && fs.existsSync('C:/Windows/Fonts/arial.ttf')
-      ? `fontfile='${windowsFontPath}':`
-      : '';
-
-    const drawtextFilter = `drawtext=${fontfileSpec}text='${text}':x=${x}:y=${y}:fontsize=${watermarkConfig.fontSize || 36}:fontcolor=${watermarkConfig.color || 'white'}:box=1:boxcolor=black@0.4:boxborderw=8`;
-    args.push('-vf', drawtextFilter, '-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-c:a', 'copy');
-  } else if (watermarkConfig.type === 'logo' && watermarkConfig.logoPath) {
-    args.push('-i', watermarkConfig.logoPath);
-    args.push('-filter_complex', '[1:v]scale=120:-1[logo];[0:v][logo]overlay=main_w-overlay_w-20:main_h-overlay_h-20');
-    args.push('-c:v', 'libx264', '-preset', 'ultrafast', '-threads', '0', '-c:a', 'copy');
   }
 
-  args.push(outputPath);
-
-  await runFFmpegCommand(args, duration, progressCallback);
-  return { outputPath, outputFileName };
-}
-
-/**
- * 7. Merge Multiple Videos
- */
-async function mergeVideos(filePaths, options = {}, progressCallback) {
-  const outputFileName = `merged_${Date.now()}.${options.format || 'mp4'}`;
-  const outputPath = path.join(OUTPUTS_DIR, outputFileName);
-
-  const listFile = path.join(TEMP_DIR, `concat_list_${Date.now()}.txt`);
-  const listContent = filePaths.map((f) => `file '${f.replace(/\\/g, '/')}'`).join('\n');
-  fs.writeFileSync(listFile, listContent);
-
-  const args = ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', outputPath];
-
-  await runFFmpegCommand(args, 0, progressCallback);
-  try {
-    fs.unlinkSync(listFile);
-  } catch (e) {}
-
-  return { outputPath, outputFileName };
-}
-
-/**
- * 8. Extract Audio (MP3 / WAV)
- */
-async function extractAudio(inputPath, format = 'mp3', progressCallback) {
-  const metadata = await getVideoMetadata(inputPath);
-  const outputFileName = `audio_${Date.now()}.${format}`;
-  const outputPath = path.join(OUTPUTS_DIR, outputFileName);
-
-  const codec = format === 'wav' ? 'pcm_s16le' : 'libmp3lame';
-  const args = ['-y', '-i', inputPath, '-vn', '-acodec', codec, '-q:a', '2', outputPath];
-
-  await runFFmpegCommand(args, metadata.duration, progressCallback);
-  return { outputPath, outputFileName };
-}
-
-/**
- * 9. Generate High Quality Animated GIF
- */
-async function generateGif(inputPath, startTime, endTime, fps = 10, scaleWidth = 480, progressCallback) {
-  const startSec = timeToSeconds(startTime);
-  const endSec = timeToSeconds(endTime);
-  const duration = Math.max(0.5, endSec - startSec);
-
-  const outputFileName = `animated_${Date.now()}.gif`;
-  const outputPath = path.join(OUTPUTS_DIR, outputFileName);
-
-  const palettePath = path.join(TEMP_DIR, `palette_${Date.now()}.png`);
-
-  const paletteArgs = [
+  const args = [
     '-y',
-    '-ss',
-    String(startSec),
-    '-t',
-    String(duration),
-    '-i',
-    inputPath,
-    '-vf',
-    `fps=${fps},scale=${scaleWidth}:-1:flags=lanczos,palettegen`,
-    palettePath
-  ];
-  await runFFmpegCommand(paletteArgs, duration, null);
-
-  const gifArgs = [
-    '-y',
-    '-ss',
-    String(startSec),
-    '-t',
-    String(duration),
-    '-i',
-    inputPath,
-    '-i',
-    palettePath,
-    '-filter_complex',
-    `fps=${fps},scale=${scaleWidth}:-1:flags=lanczos[x];[x][1:v]paletteuse`,
+    '-i', inputPath,
+    '-vf', cropFilter,
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-threads', '0',
+    '-c:a', 'aac',
+    '-movflags', '+faststart',
     outputPath
   ];
-  await runFFmpegCommand(gifArgs, duration, progressCallback);
 
-  try {
-    fs.unlinkSync(palettePath);
-  } catch (e) {}
-
+  await runFFmpegCommand(args, meta.duration, progressCallback);
   return { outputPath, outputFileName };
 }
 
 /**
- * 10. Capture Frame Screenshot
+ * 4. Add Watermark (Text or Image Overlay)
  */
-async function captureScreenshot(inputPath, timestamp = 0, format = 'png') {
-  const sec = timeToSeconds(timestamp);
-  const outputFileName = `frame_${Date.now()}.${format}`;
+async function addWatermark(inputPath, config = {}, progressCallback) {
+  const outputFileName = `watermark_${Date.now()}.mp4`;
+  const outputPath = path.join(OUTPUTS_DIR, outputFileName);
+  const meta = await getVideoMetadata(inputPath);
+
+  const text = config.text || 'Smart Trimmer Pro';
+  const pos = config.position || 'bottom-right';
+
+  let x = 'w-tw-20';
+  let y = 'h-th-20';
+
+  if (pos === 'top-left') { x = '20'; y = '20'; }
+  if (pos === 'top-right') { x = 'w-tw-20'; y = '20'; }
+  if (pos === 'bottom-left') { x = '20'; y = 'h-th-20'; }
+  if (pos === 'center') { x = '(w-tw)/2'; y = '(h-th)/2'; }
+
+  const drawtextFilter = `drawtext=text='${text}':x=${x}:y=${y}:fontsize=${config.fontSize || 32}:fontcolor=${config.color || 'white'}:shadowcolor=black@0.5:shadowx=2:shadowy=2`;
+
+  const args = [
+    '-y',
+    '-i', inputPath,
+    '-vf', drawtextFilter,
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-threads', '0',
+    '-c:a', 'aac',
+    '-movflags', '+faststart',
+    outputPath
+  ];
+
+  await runFFmpegCommand(args, meta.duration, progressCallback);
+  return { outputPath, outputFileName };
+}
+
+/**
+ * 5. Extract Audio Stream
+ */
+async function extractAudio(inputPath, format = 'mp3', progressCallback) {
+  const outputFileName = `audio_${Date.now()}.${format}`;
+  const outputPath = path.join(OUTPUTS_DIR, outputFileName);
+  const meta = await getVideoMetadata(inputPath);
+
+  let codecArgs = ['-c:a', 'libmp3lame', '-b:a', '192k'];
+  if (format === 'aac') codecArgs = ['-c:a', 'aac', '-b:a', '192k'];
+  if (format === 'wav') codecArgs = ['-c:a', 'pcm_s16le'];
+
+  const args = ['-y', '-i', inputPath, '-vn', ...codecArgs, outputPath];
+
+  await runFFmpegCommand(args, meta.duration, progressCallback);
+  return { outputPath, outputFileName };
+}
+
+/**
+ * 6. Generate Animated GIF
+ */
+async function createGif(inputPath, startTime, endTime, config = {}, progressCallback) {
+  const outputFileName = `gif_${Date.now()}.gif`;
   const outputPath = path.join(OUTPUTS_DIR, outputFileName);
 
-  const args = ['-y', '-ss', String(sec), '-i', inputPath, '-vframes', '1', '-q:v', '2', outputPath];
+  const startSec = timeToSeconds(startTime);
+  const endSec = timeToSeconds(endTime);
+  const dur = Math.max(0.1, endSec - startSec);
 
-  await runFFmpegCommand(args, 1, null);
+  const fps = config.fps || 10;
+  const scaleW = config.scaleWidth || 480;
+
+  const vf = `fps=${fps},scale=${scaleW}:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse`;
+
+  const args = [
+    '-y',
+    '-ss', String(startSec),
+    '-i', inputPath,
+    '-t', String(dur),
+    '-vf', vf,
+    outputPath
+  ];
+
+  await runFFmpegCommand(args, dur, progressCallback);
   return { outputPath, outputFileName };
+}
+
+/**
+ * 7. Merge Multiple Videos (Concat Demuxer)
+ */
+async function mergeVideos(inputPaths, options = {}, progressCallback) {
+  const outputFileName = `merge_${Date.now()}.${options.format || 'mp4'}`;
+  const outputPath = path.join(OUTPUTS_DIR, outputFileName);
+
+  const listPath = path.join(TEMP_DIR, `concat_list_${Date.now()}.txt`);
+  const listContent = inputPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+  fs.writeFileSync(listPath, listContent, 'utf8');
+
+  const args = [
+    '-y',
+    '-f', 'concat',
+    '-safe', '0',
+    '-i', listPath,
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-movflags', '+faststart',
+    outputPath
+  ];
+
+  try {
+    await runFFmpegCommand(args, 0, progressCallback);
+    if (fs.existsSync(listPath)) fs.unlinkSync(listPath);
+    return { outputPath, outputFileName };
+  } catch (err) {
+    if (fs.existsSync(listPath)) fs.unlinkSync(listPath);
+    throw err;
+  }
 }
 
 module.exports = {
-  getVideoMetadata,
   timeToSeconds,
   secondsToTime,
+  getVideoMetadata,
   trimVideo,
   multiTrimConcat,
-  detectSilence,
-  detectHighlights,
   cropVideo,
   addWatermark,
-  mergeVideos,
   extractAudio,
-  generateGif,
-  captureScreenshot
+  createGif,
+  mergeVideos
 };

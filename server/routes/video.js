@@ -89,7 +89,9 @@ router.post('/trim-direct', (req, res) => {
     '-ss', String(startSec),
     '-i', 'pipe:0',
     '-t', String(targetDuration),
-    '-c', 'copy',
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-movflags', '+faststart',
     outputPath
   ]);
 
