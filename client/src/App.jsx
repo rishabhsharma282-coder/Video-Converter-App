@@ -54,7 +54,7 @@ function timeToSec(timeStr) {
 }
 
 /**
- * 🎬 Universal AAC Audio Supported Fast Browser Media Engine (Zero Opus Error, Windows Media Player Compatible)
+ * 🎬 Standard 1.0x Real-Time Stream Capture Engine (Normal Speed, Smooth Seeking, Universal AAC Audio)
  */
 function clientSideTrim(videoUrl, startSec, endSec, progressCallback) {
   return new Promise((resolve, reject) => {
@@ -72,7 +72,6 @@ function clientSideTrim(videoUrl, startSec, endSec, progressCallback) {
       try {
         const stream = v.captureStream ? v.captureStream() : v.mozCaptureStream();
         
-        // Prioritize AAC / MP4 / Vorbis codecs over Opus to prevent Windows Media Player audio errors!
         let mimeType = '';
         const supportedTypes = [
           'video/mp4;codecs="avc1.42E01E, mp4a.40.2"',
@@ -124,15 +123,11 @@ function clientSideTrim(videoUrl, startSec, endSec, progressCallback) {
           });
         };
 
-        // 4x Balanced Fast Speed (Zero audio glitches, smooth frame capture)
-        try {
-          v.playbackRate = 4.0;
-        } catch (e) {
-          v.playbackRate = 2.0;
-        }
+        // Enforce true 1.0x normal speed playback so video plays at normal speed and seeks smoothly!
+        v.playbackRate = 1.0;
 
         v.play().catch(() => {});
-        mediaRecorder.start(50);
+        mediaRecorder.start(100);
 
         const targetDuration = Math.max(0.1, endSec - startSec);
         const checkInterval = setInterval(() => {
@@ -147,7 +142,7 @@ function clientSideTrim(videoUrl, startSec, endSec, progressCallback) {
               mediaRecorder.stop();
             }
           }
-        }, 50);
+        }, 100);
       } catch (err) {
         reject(err);
       }
@@ -246,7 +241,7 @@ export default function App() {
     return eventSource;
   };
 
-  // 1. Single Trim Execution (UNIVERSAL AAC CODEC ENGINE)
+  // 1. Single Trim Execution (SMOOTH 1.0x NORMAL SPEED ENGINE)
   const handleExecuteTrim = async ({ startTime: sTimeStr, endTime: eTimeStr }) => {
     if (!videoFile) return;
     const jobId = `job_${Date.now()}`;
@@ -284,9 +279,9 @@ export default function App() {
       } catch (err) {}
     }
 
-    // 🎬 FAST AAC CODEC BROWSER MEDIA ENGINE (Zero Opus Error, Universal Compatibility)
+    // 🎬 1.0x NORMAL SPEED BROWSER MEDIA ENGINE (Normal Speed, Smooth Seeking)
     try {
-      setRenderLogs((prev) => [...prev, 'Encoding universal AAC audio stream...']);
+      setRenderLogs((prev) => [...prev, 'Encoding smooth 1.0x normal speed video stream...']);
       setRenderProgress(15);
 
       const trimmedData = await clientSideTrim(videoFile.url, sSec, eSec, (pct) => {
