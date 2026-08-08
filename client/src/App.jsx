@@ -149,7 +149,7 @@ async function relocateMoovToFront(blob) {
 }
 
 /**
- * ⚡ 4.0x Turbo Speed Engine (+mvhd duration patch & +faststart moov relocation)
+ * 🎬 Standard 1.0x Normal Speed Engine (Guaranteed 100% Normal Playback Speed, AAC Audio, Active Seeking)
  */
 function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
   return new Promise((resolve, reject) => {
@@ -226,10 +226,10 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
           });
         };
 
-        // ⚡ 4.0x Turbo Fast Playback Rate for 4x Faster Rendering Speed!
-        v.playbackRate = 4.0;
+        // 🎬 STRICT 1.0x Normal Speed Playback Rate so downloaded video plays at 100% NORMAL speed!
+        v.playbackRate = 1.0;
         v.play().catch(() => {});
-        mediaRecorder.start(20);
+        mediaRecorder.start(100);
 
         const targetDuration = Math.max(0.1, endSec - startSec);
         const checkInterval = setInterval(() => {
@@ -244,7 +244,7 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
               mediaRecorder.stop();
             }
           }
-        }, 20);
+        }, 100);
       } catch (err) {
         reject(err);
       }
@@ -312,7 +312,7 @@ export default function App() {
     setIsProcessing(true);
     setRenderModalOpen(true);
     setRenderProgress(0);
-    setRenderLogs(['Executing turbo precision video trim...']);
+    setRenderLogs(['Executing precision video trim...']);
     setRenderComplete(false);
     setRenderError(null);
     setRenderResult(null);
@@ -381,9 +381,9 @@ export default function App() {
       } catch (err) {}
     }
 
-    // 🎬 4.0X TURBO SPEED ACCURATE TRIM ENGINE
+    // 🎬 1.0X TRUE NORMAL SPEED ACCURATE TRIM ENGINE
     try {
-      setRenderLogs((prev) => [...prev, 'Encoding 4.0x turbo fast seekable MP4 clip...']);
+      setRenderLogs((prev) => [...prev, 'Encoding seekable MP4 clip at 1.0x normal speed...']);
       setRenderProgress(15);
 
       const trimmedData = await accurateClientTrim(
