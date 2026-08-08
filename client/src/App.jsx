@@ -149,7 +149,7 @@ async function relocateMoovToFront(blob) {
 }
 
 /**
- * 🎬 Standard 1.0x Normal Speed Engine (+mvhd duration patch & +faststart moov relocation)
+ * ⚡ 4.0x Turbo Speed Engine (+mvhd duration patch & +faststart moov relocation)
  */
 function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
   return new Promise((resolve, reject) => {
@@ -226,9 +226,10 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
           });
         };
 
-        v.playbackRate = 1.0;
+        // ⚡ 4.0x Turbo Fast Playback Rate for 4x Faster Rendering Speed!
+        v.playbackRate = 4.0;
         v.play().catch(() => {});
-        mediaRecorder.start(100);
+        mediaRecorder.start(20);
 
         const targetDuration = Math.max(0.1, endSec - startSec);
         const checkInterval = setInterval(() => {
@@ -243,7 +244,7 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
               mediaRecorder.stop();
             }
           }
-        }, 100);
+        }, 20);
       } catch (err) {
         reject(err);
       }
@@ -311,7 +312,7 @@ export default function App() {
     setIsProcessing(true);
     setRenderModalOpen(true);
     setRenderProgress(0);
-    setRenderLogs(['Executing precision video trim...']);
+    setRenderLogs(['Executing turbo precision video trim...']);
     setRenderComplete(false);
     setRenderError(null);
     setRenderResult(null);
@@ -380,9 +381,9 @@ export default function App() {
       } catch (err) {}
     }
 
-    // 🎬 ACCURATE BROWSER TRIM ENGINE WITH DURATION PATCH & FASTSTART MOOV RELOCATION
+    // 🎬 4.0X TURBO SPEED ACCURATE TRIM ENGINE
     try {
-      setRenderLogs((prev) => [...prev, 'Encoding seekable MP4 clip with duration headers...']);
+      setRenderLogs((prev) => [...prev, 'Encoding 4.0x turbo fast seekable MP4 clip...']);
       setRenderProgress(15);
 
       const trimmedData = await accurateClientTrim(
