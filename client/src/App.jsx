@@ -54,7 +54,50 @@ function timeToSec(timeStr) {
 }
 
 /**
- * 🎬 Standard 1.0x Real-Time Stream Capture Engine (Normal Speed, Smooth Seeking, Universal AAC Audio)
+ * 🛠️ Standalone WebM/MP4 Duration Header Ingestor (Fixes Windows Media Player Seek Bar)
+ */
+function fixContainerDuration(blob, durationSec) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const buffer = reader.result;
+        const view = new DataView(buffer);
+        const bytes = new Uint8Array(buffer);
+        const durationMs = Math.round(durationSec * 1000);
+
+        let durationOffset = -1;
+        let durationSize = 0;
+
+        for (let i = 0; i < bytes.length - 4; i++) {
+          if (bytes[i] === 0x44 && bytes[i + 1] === 0x89) { // 0x4489 = WebM Duration Header
+            durationOffset = i + 2;
+            const lenByte = bytes[durationOffset];
+            durationSize = lenByte & 0x0f;
+            durationOffset += 1;
+            break;
+          }
+        }
+
+        if (durationOffset !== -1 && durationSize === 8) {
+          view.setFloat64(durationOffset, durationMs, false);
+          resolve(new Blob([buffer], { type: blob.type }));
+          return;
+        } else if (durationOffset !== -1 && durationSize === 4) {
+          view.setFloat32(durationOffset, durationMs, false);
+          resolve(new Blob([buffer], { type: blob.type }));
+          return;
+        }
+      } catch (err) {}
+      resolve(blob);
+    };
+    reader.onerror = () => resolve(blob);
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+/**
+ * 🎬 Standard 1.0x Real-Time Stream Capture Engine with Duration Header Injection
  */
 function clientSideTrim(videoUrl, startSec, endSec, progressCallback) {
   return new Promise((resolve, reject) => {
@@ -99,9 +142,14 @@ function clientSideTrim(videoUrl, startSec, endSec, progressCallback) {
           if (e.data.size > 0) chunks.push(e.data);
         };
 
-        mediaRecorder.onstop = () => {
-          const blob = new Blob(chunks, { type: mimeType });
-          const outputUrl = URL.createObjectURL(blob);
+        mediaRecorder.onstop = async () => {
+          const rawBlob = new Blob(chunks, { type: mimeType });
+          const targetDurSec = Math.max(0.1, endSec - startSec);
+          
+          // Inject duration header so Windows Media Player seek bar becomes active & draggable!
+          const seekableBlob = await fixContainerDuration(rawBlob, targetDurSec);
+
+          const outputUrl = URL.createObjectURL(seekableBlob);
           const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
           const outputFileName = `trim_${Date.now()}.${ext}`;
 
@@ -109,21 +157,20 @@ function clientSideTrim(videoUrl, startSec, endSec, progressCallback) {
             success: true,
             outputFileName,
             downloadUrl: outputUrl,
-            sizeBytes: blob.size,
+            sizeBytes: seekableBlob.size,
             historyItem: {
               id: Date.now(),
               fileName: outputFileName,
               originalName: 'Trimmed Clip',
               action: 'Precision Trim',
-              trimDuration: `${(endSec - startSec).toFixed(1)}s`,
-              outputSize: blob.size,
+              trimDuration: `${targetDurSec.toFixed(1)}s`,
+              outputSize: seekableBlob.size,
               downloadUrl: outputUrl,
               timestamp: new Date().toLocaleTimeString()
             }
           });
         };
 
-        // Enforce true 1.0x normal speed playback so video plays at normal speed and seeks smoothly!
         v.playbackRate = 1.0;
 
         v.play().catch(() => {});
@@ -241,7 +288,7 @@ export default function App() {
     return eventSource;
   };
 
-  // 1. Single Trim Execution (SMOOTH 1.0x NORMAL SPEED ENGINE)
+  // 1. Single Trim Execution (SMOOTH SEEKABLE ENGINE)
   const handleExecuteTrim = async ({ startTime: sTimeStr, endTime: eTimeStr }) => {
     if (!videoFile) return;
     const jobId = `job_${Date.now()}`;
@@ -279,9 +326,9 @@ export default function App() {
       } catch (err) {}
     }
 
-    // 🎬 1.0x NORMAL SPEED BROWSER MEDIA ENGINE (Normal Speed, Smooth Seeking)
+    // 🎬 SEEKABLE 1.0x BROWSER MEDIA ENGINE (Duration Header Injected)
     try {
-      setRenderLogs((prev) => [...prev, 'Encoding smooth 1.0x normal speed video stream...']);
+      setRenderLogs((prev) => [...prev, 'Injecting seekable duration headers...']);
       setRenderProgress(15);
 
       const trimmedData = await clientSideTrim(videoFile.url, sSec, eSec, (pct) => {
