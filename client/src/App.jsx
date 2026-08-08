@@ -54,8 +54,60 @@ function timeToSec(timeStr) {
 }
 
 /**
+ * 🛠️ Patches MP4 'mvhd' and 'tkhd' boxes in binary ArrayBuffer
+ * so Windows Media Player reads exact duration (e.g. 00:00:15) instead of (--) and activates draggable seek bar!
+ */
+async function patchMp4DurationHeaders(blob, durationSec) {
+  try {
+    const buffer = await blob.arrayBuffer();
+    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer);
+
+    for (let offset = 0; offset < bytes.length - 12; offset++) {
+      // Look for 'mvhd' box (Movie Header Box)
+      if (bytes[offset] === 0x6d && bytes[offset+1] === 0x76 && bytes[offset+2] === 0x68 && bytes[offset+3] === 0x64) {
+        const mvhdPos = offset + 4;
+        const version = bytes[mvhdPos];
+        const timescalePos = version === 1 ? mvhdPos + 20 : mvhdPos + 12;
+        const durationPos = version === 1 ? mvhdPos + 24 : mvhdPos + 16;
+        
+        const timescale = view.getUint32(timescalePos, false) || 1000;
+        const durUnits = Math.round(durationSec * timescale);
+
+        if (version === 1) {
+          if (typeof view.setBigUint64 === 'function') {
+            view.setBigUint64(durationPos, BigInt(durUnits), false);
+          }
+        } else {
+          view.setUint32(durationPos, durUnits, false);
+        }
+      }
+
+      // Look for 'tkhd' box (Track Header Box)
+      if (bytes[offset] === 0x74 && bytes[offset+1] === 0x6b && bytes[offset+2] === 0x68 && bytes[offset+3] === 0x64) {
+        const tkhdPos = offset + 4;
+        const version = bytes[tkhdPos];
+        const durationPos = version === 1 ? tkhdPos + 28 : tkhdPos + 20;
+        const timescale = 1000;
+        const durUnits = Math.round(durationSec * timescale);
+
+        if (version === 1) {
+          if (typeof view.setBigUint64 === 'function') {
+            view.setBigUint64(durationPos, BigInt(durUnits), false);
+          }
+        } else {
+          view.setUint32(durationPos, durUnits, false);
+        }
+      }
+    }
+
+    return new Blob([buffer], { type: 'video/mp4' });
+  } catch (e) {}
+  return blob;
+}
+
+/**
  * 🚀 Relocates MP4 'moov' atom from end of file to front (+faststart)
- * so Windows Media Player immediately sees duration & draggable seek bar!
  */
 async function relocateMoovToFront(blob) {
   try {
@@ -97,7 +149,7 @@ async function relocateMoovToFront(blob) {
 }
 
 /**
- * 🎬 Standard 1.0x Normal Speed Engine (+faststart moov relocation for Windows Media Player seek bar)
+ * 🎬 Standard 1.0x Normal Speed Engine (+mvhd duration patch & +faststart moov relocation)
  */
 function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
   return new Promise((resolve, reject) => {
@@ -143,15 +195,18 @@ function accurateClientTrim(videoUrl, startSec, endSec, progressCallback) {
         };
 
         mediaRecorder.onstop = async () => {
+          const targetDur = Math.max(0.1, endSec - startSec);
           const rawBlob = new Blob(chunks, { type: mimeType });
           
-          // Relocate moov atom to front so Windows Media Player seek bar is 100% active & draggable!
-          const seekableBlob = await relocateMoovToFront(rawBlob);
+          // 1. Patch mvhd and tkhd duration headers so Windows Media Player displays exact total time!
+          const durationPatchedBlob = await patchMp4DurationHeaders(rawBlob, targetDur);
+
+          // 2. Relocate moov atom to front (+faststart) so seek bar is 100% active & draggable!
+          const seekableBlob = await relocateMoovToFront(durationPatchedBlob);
 
           const outputUrl = URL.createObjectURL(seekableBlob);
           const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
           const outputFileName = `trim_${Date.now()}.${ext}`;
-          const targetDur = Math.max(0.1, endSec - startSec);
 
           resolve({
             success: true,
@@ -325,9 +380,9 @@ export default function App() {
       } catch (err) {}
     }
 
-    // 🎬 ACCURATE BROWSER TRIM ENGINE WITH FASTSTART MOOV RELOCATION
+    // 🎬 ACCURATE BROWSER TRIM ENGINE WITH DURATION PATCH & FASTSTART MOOV RELOCATION
     try {
-      setRenderLogs((prev) => [...prev, 'Encoding seekable MP4 clip...']);
+      setRenderLogs((prev) => [...prev, 'Encoding seekable MP4 clip with duration headers...']);
       setRenderProgress(15);
 
       const trimmedData = await accurateClientTrim(
