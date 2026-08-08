@@ -54,14 +54,15 @@ function timeToSec(timeStr) {
 }
 
 /**
- * ⚡ Supersonic 16x Speed Hardware-Accelerated Browser Engine
+ * ⚡ Supersonic 16x Speed Silent Browser Engine (Zero Speaker Audio Noise)
  */
 function clientSideTrim(videoUrl, startSec, endSec, progressCallback) {
   return new Promise((resolve, reject) => {
     const v = document.createElement('video');
     v.src = videoUrl;
     v.crossOrigin = 'anonymous';
-    v.muted = false;
+    v.muted = true; // 🔇 Mute speaker playback so no fast audio noise plays in background!
+    v.volume = 0;
 
     v.onloadedmetadata = () => {
       v.currentTime = startSec;
@@ -105,7 +106,7 @@ function clientSideTrim(videoUrl, startSec, endSec, progressCallback) {
           });
         };
 
-        // Enable 16x Hardware-Accelerated Playback Capture Speed!
+        // Enable 16x Hardware-Accelerated Capture Speed
         try {
           v.playbackRate = 16.0;
         } catch (e) {
@@ -227,7 +228,7 @@ export default function App() {
     return eventSource;
   };
 
-  // 1. Single Trim Execution (SUPERSONIC 16x SPEED ENGINE)
+  // 1. Single Trim Execution (SILENT 16x SPEED ENGINE)
   const handleExecuteTrim = async ({ startTime: sTimeStr, endTime: eTimeStr }) => {
     if (!videoFile) return;
     const jobId = `job_${Date.now()}`;
@@ -265,9 +266,9 @@ export default function App() {
       } catch (err) {}
     }
 
-    // ⚡ SUPERSONIC 16x SPEED HARDWARE ENGINE
+    // ⚡ SILENT 16x HARDWARE ENGINE (Muted Speaker Playback)
     try {
-      setRenderLogs((prev) => [...prev, 'Running 16x Hardware-Accelerated Capture Engine...']);
+      setRenderLogs((prev) => [...prev, 'Running Silent 16x Hardware Engine...']);
       setRenderProgress(15);
 
       const trimmedData = await clientSideTrim(videoFile.url, sSec, eSec, (pct) => {
