@@ -14,6 +14,9 @@ export default function RenderProgressModal({
 
   if (!isOpen) return null;
 
+  const downloadHref = resultData?.downloadUrl || (resultData?.outputFileName ? `/api/video/download/${resultData.outputFileName}` : '#');
+  const downloadFileName = resultData?.outputFileName || 'trimmed_video.mp4';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
       <div className="relative w-full max-w-lg rounded-3xl glass-panel border border-slate-700/80 p-8 shadow-2xl space-y-6 animate-in fade-in zoom-in duration-200">
@@ -71,15 +74,15 @@ export default function RenderProgressModal({
         )}
 
         {/* Complete State Download Button */}
-        {isComplete && resultData?.downloadUrl && (
+        {isComplete && resultData && (
           <div className="space-y-3 pt-2">
             <a
-              href={`/api/video/download/${resultData.outputFileName}`}
-              download
+              href={downloadHref}
+              download={downloadFileName}
               className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-bold text-sm flex items-center justify-center space-x-2 transition-all shadow-xl shadow-emerald-500/20"
             >
               <Download className="w-5 h-5" />
-              <span>Download Processed Video</span>
+              <span>Download Processed Video ({downloadFileName.endsWith('.mp4') ? 'MP4' : 'WEBM'})</span>
             </a>
           </div>
         )}
